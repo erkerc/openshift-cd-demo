@@ -87,6 +87,7 @@ objects:
           value: ${ENABLE_QUAY}
         jenkinsfile: |-
           def mvnCmd = "mvn -s configuration/cicd-settings-nexus3.xml"
+
           pipeline {
             agent {
               label 'maven'
@@ -147,6 +148,7 @@ objects:
                   timeout(time:15, unit:'MINUTES') {
                       input message: "Promote to STAGE?", ok: "Promote"
                   }
+
                   script {
                     openshift.withCluster() {
                       if (env.ENABLE_QUAY.toBoolean()) {
@@ -277,6 +279,7 @@ objects:
             # adjust jenkins 
             oc set resources dc/jenkins --limits=cpu=4,memory=4Gi --requests=cpu=1,memory=1Gi 
             oc label dc jenkins app=jenkins --overwrite 
+
             # setup dev env
             oc import-image wildfly --from=openshift/wildfly-120-centos7 --confirm -n ${DEV_PROJECT} 
             
@@ -318,58 +321,87 @@ objects:
             oc set probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10 -n ${DEV_PROJECT}
             oc set probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 -n ${DEV_PROJECT}
             oc rollout cancel dc/tasks -n ${STAGE_PROJECT}
+
             # stage project
             oc expose dc/tasks --port=8080 -n ${STAGE_PROJECT}
             oc expose svc/tasks -n ${STAGE_PROJECT}
             oc set probe dc/tasks --readiness --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=30 --failure-threshold=10 --period-seconds=10 -n ${STAGE_PROJECT}
             oc set probe dc/tasks --liveness  --get-url=http://:8080/ws/demo/healthcheck --initial-delay-seconds=180 --failure-threshold=10 --period-seconds=10 -n ${STAGE_PROJECT}
             oc rollout cancel dc/tasks -n ${DEV_PROJECT}
+
             # deploy gogs
             HOSTNAME=$(oc get route jenkins -o template --template='{{.spec.host}}' | sed "s/jenkins-${CICD_NAMESPACE}.//g")
             GOGS_HOSTNAME="gogs-$CICD_NAMESPACE.$HOSTNAME"
+
+            # if [ "${EPHEMERAL}" == "true" ] ; then
+            #   oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-template.yaml \
+            #       --param=GOGS_VERSION=0.11.34 \
+            #       --param=DATABASE_VERSION=9.6 \
+            #       --param=HOSTNAME=$GOGS_HOSTNAME \
+            #       --param=SKIP_TLS_VERIFY=true
+            # else
+            #   oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \
+            #       --param=GOGS_VERSION=0.11.34 \
+            #       --param=DATABASE_VERSION=9.6 \
+            #       --param=HOSTNAME=$GOGS_HOSTNAME \
+            #       --param=SKIP_TLS_VERIFY=true
+            # fi
+
             if [ "${EPHEMERAL}" == "true" ] ; then
-             oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-template.yaml \
+              oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-template.yaml \
                   --param=GOGS_VERSION=0.11.34 \
                   --param=DATABASE_VERSION=9.6 \
                   --param=HOSTNAME=$GOGS_HOSTNAME \
                   --param=SKIP_TLS_VERIFY=true
             else
-             oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \                  --param=GOGS_VERSION=0.11.34 \
+              oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \
+                  --param=GOGS_VERSION=0.11.34 \
                   --param=DATABASE_VERSION=9.6 \
                   --param=HOSTNAME=$GOGS_HOSTNAME \
                   --param=SKIP_TLS_VERIFY=true
             fi
             
             sleep 5
+
             if [ "${EPHEMERAL}" == "true" ] ; then
               oc new-app -f https://raw.githubusercontent.com/siamaksade/sonarqube/master/sonarqube-template.yml --param=SONARQUBE_MEMORY_LIMIT=2Gi
             else
               oc new-app -f https://raw.githubusercontent.com/siamaksade/sonarqube/master/sonarqube-persistent-template.yml --param=SONARQUBE_MEMORY_LIMIT=2Gi
             fi
-            oc set resources dc/sonardb --limits=cpu=500m,memory=1Gi --requests=cpu=250m,memory=256Mi
-            oc set resources dc/sonarqube --limits=cpu=2,memory=4Gi --requests=cpu=500m,memory=256Mi
+
+            oc set resources dc/sonardb --limits=cpu=1,memory=512Mi --requests=cpu=500m,memory=256Mi
+            oc set resources dc/sonarqube --limits=cpu=1,memory=2Gi --requests=cpu=500m,memory=1Gi
+
             if [ "${EPHEMERAL}" == "true" ] ; then
               oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=4Gi
             else
               oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-persistent-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=4Gi
             fi
+
             oc set resources dc/nexus --requests=cpu=1 --limits=cpu=4
+
             GOGS_SVC=$(oc get svc gogs -o template --template='{{.spec.clusterIP}}')
             GOGS_USER=gogs
             GOGS_PWD=gogs
+
             oc rollout status dc gogs
+
             _RETURN=$(curl -o /tmp/curl.log -sL --post302 -w "%{http_code}" http://$GOGS_SVC:3000/user/sign_up \
               --form user_name=$GOGS_USER \
               --form password=$GOGS_PWD \
               --form retype=$GOGS_PWD \
               --form email=admin@gogs.com)
+
             sleep 5
+
             if [ $_RETURN != "200" ] && [ $_RETURN != "302" ] ; then
               echo "ERROR: Failed to create Gogs admin"
               cat /tmp/curl.log
               exit 255
             fi
+
             sleep 10
+
             cat <<EOF > /tmp/data.json
             {
               "clone_addr": "https://github.com/OpenShiftDemos/openshift-tasks.git",
@@ -377,14 +409,18 @@ objects:
               "repo_name": "openshift-tasks"
             }
             EOF
+
             _RETURN=$(curl -o /tmp/curl.log -sL -w "%{http_code}" -H "Content-Type: application/json" \
             -u $GOGS_USER:$GOGS_PWD -X POST http://$GOGS_SVC:3000/api/v1/repos/migrate -d @/tmp/data.json)
+
             if [ $_RETURN != "201" ] ;then
               echo "ERROR: Failed to import openshift-tasks GitHub repo"
               cat /tmp/curl.log
               exit 255
             fi
+
             sleep 5
+
             cat <<EOF > /tmp/data.json
             {
               "type": "gogs",
@@ -398,19 +434,23 @@ objects:
               "active": true
             }
             EOF
+
             _RETURN=$(curl -o /tmp/curl.log -sL -w "%{http_code}" -H "Content-Type: application/json" \
             -u $GOGS_USER:$GOGS_PWD -X POST http://$GOGS_SVC:3000/api/v1/repos/gogs/openshift-tasks/hooks -d @/tmp/data.json)
+
             if [ $_RETURN != "201" ] ; then
               echo "ERROR: Failed to set webhook"
               cat /tmp/curl.log
               exit 255
             fi
+
             oc label dc sonarqube "app.kubernetes.io/part-of"="sonarqube" --overwrite
             oc label dc sonardb "app.kubernetes.io/part-of"="sonarqube" --overwrite
             oc label dc jenkins "app.kubernetes.io/part-of"="jenkins" --overwrite
             oc label dc nexus "app.kubernetes.io/part-of"="nexus" --overwrite
             oc label dc gogs "app.kubernetes.io/part-of"="gogs" --overwrite
             oc label dc gogs-postgresql "app.kubernetes.io/part-of"="gogs" --overwrite
+
           image: quay.io/openshift/origin-cli:v4.0
           name: cicd-demo-installer-job
           resources: {}
