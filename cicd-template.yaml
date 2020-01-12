@@ -277,7 +277,7 @@ objects:
           - -c
           - |           
             # adjust jenkins 
-            oc set resources dc/jenkins --limits=cpu=2,memory=2Gi --requests=cpu=100m,memory=512Mi 
+            oc set resources dc/jenkins --limits=cpu=3,memory=4Gi --requests=cpu=1,memory=1Gi 
             oc label dc jenkins app=jenkins --overwrite 
 
             # setup dev env
@@ -333,19 +333,34 @@ objects:
             HOSTNAME=$(oc get route jenkins -o template --template='{{.spec.host}}' | sed "s/jenkins-${CICD_NAMESPACE}.//g")
             GOGS_HOSTNAME="gogs-$CICD_NAMESPACE.$HOSTNAME"
 
+ # if [ "${EPHEMERAL}" == "true" ] ; then
+            #   oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-template.yaml \
+            #       --param=GOGS_VERSION=0.11.34 \
+            #       --param=DATABASE_VERSION=9.6 \
+            #       --param=HOSTNAME=$GOGS_HOSTNAME \
+            #       --param=SKIP_TLS_VERIFY=true
+            # else
+            #   oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \
+            #       --param=GOGS_VERSION=0.11.34 \
+            #       --param=DATABASE_VERSION=9.6 \
+            #       --param=HOSTNAME=$GOGS_HOSTNAME \
+            #       --param=SKIP_TLS_VERIFY=true
+            # fi
+            
             if [ "${EPHEMERAL}" == "true" ] ; then
-              oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-template.yaml \
+              oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-template.yaml \
                   --param=GOGS_VERSION=0.11.34 \
                   --param=DATABASE_VERSION=9.6 \
                   --param=HOSTNAME=$GOGS_HOSTNAME \
                   --param=SKIP_TLS_VERIFY=true
             else
-              oc new-app -f https://raw.githubusercontent.com/siamaksade/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \
+              oc new-app -f  https://raw.githubusercontent.com/OpenShiftDemos/gogs-openshift-docker/master/openshift/gogs-persistent-template.yaml \
                   --param=GOGS_VERSION=0.11.34 \
                   --param=DATABASE_VERSION=9.6 \
                   --param=HOSTNAME=$GOGS_HOSTNAME \
                   --param=SKIP_TLS_VERIFY=true
             fi
+
             
             sleep 5
 
@@ -355,16 +370,16 @@ objects:
               oc new-app -f https://raw.githubusercontent.com/siamaksade/sonarqube/master/sonarqube-persistent-template.yml --param=SONARQUBE_MEMORY_LIMIT=2Gi
             fi
 
-            oc set resources dc/sonardb --limits=cpu=200m,memory=512Mi --requests=cpu=50m,memory=128Mi
-            oc set resources dc/sonarqube --limits=cpu=1,memory=2Gi --requests=cpu=50m,memory=128Mi
+            oc set resources dc/sonardb --limits=cpu=1,memory=512Mi --requests=cpu=2000m,memory=256Mi
+            oc set resources dc/sonarqube --limits=cpu=1,memory=2Gi --requests=cpu=200m,memory=256Mi
 
             if [ "${EPHEMERAL}" == "true" ] ; then
-              oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=2Gi
+              oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=4Gi
             else
-              oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-persistent-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=2Gi
+              oc new-app -f https://raw.githubusercontent.com/OpenShiftDemos/nexus/master/nexus3-persistent-template.yaml --param=NEXUS_VERSION=3.13.0 --param=MAX_MEMORY=4Gi
             fi
 
-            oc set resources dc/nexus --requests=cpu=200m --limits=cpu=2
+            oc set resources dc/nexus --requests=cpu=2 --limits=cpu=4
 
             GOGS_SVC=$(oc get svc gogs -o template --template='{{.spec.clusterIP}}')
             GOGS_USER=gogs
