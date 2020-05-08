@@ -1,0 +1,133 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  annotations:
+    openshift.io/generated-by: OpenShiftNewApp
+    pipeline.alpha.openshift.io/uses: '[{"name": "jenkins", "namespace": "", "kind":
+      "DeploymentConfig"}]'
+  creationTimestamp: null
+  labels:
+    app: cicd-pipeline
+    group: cicd
+    name: cicd-pipeline
+    template: cicd
+  name: cf-sample-pipeline
+spec:
+  failedBuildsHistoryLimit: 5
+  runPolicy: Serial
+  source:
+    type: None
+  strategy:
+    jenkinsPipelineStrategy:
+      env:
+      - name: DEV_PROJECT
+        value: dev-demo
+      - name: STAGE_PROJECT
+        value: stage-demo
+      - name: APP_NAME
+        value: cf-nodejs
+      - name: NEXUS_REGISTRY_USER
+        value: admin
+      - name: NEXUS_REGISTRY_PWD
+        value: admin123
+      jenkinsfile: |-
+        pipeline {
+          agent {
+            label 'nodejs'
+          }
+          stages {
+            
+            stage('Clone Source Code') {
+              steps {
+                git branch: 'master', url: 'http://gogs:3000/gogs/cf-sample.git'
+              }
+            }
+            
+            stage('Build App') {
+              steps {
+                sh "npm install"
+              }
+            }
+         
+            stage('Code Analysis') {
+              steps {
+                script {
+                  sh "ls"
+                }
+              }
+            }
+            stage('Archive App') {
+              steps {
+                sh "ls"
+              }
+            }
+            stage('Build Image') {
+              steps {
+                script {
+                  openshift.withCluster() {
+                    openshift.withProject(env.DEV_PROJECT) {
+                      openshift.selector("bc", env.APP_NAME).startBuild("--from-dir=.", "--wait=true")
+                    }
+                  }
+                }
+              }
+            }
+
+            stage('Archive Image') {
+              agent {
+                label 'skopeo'
+              }
+              
+              steps {
+                sh 'skopeo copy docker://image-registry.openshift-image-registry.svc:5000/dev-demo/cf-nodejs:latest docker://nexus-registry:5000/cf-nodejs:latest --src-creds=erkan:$(oc whoami -t) --dest-creds=admin:admin123 --src-tls-verify=false --dest-tls-verify=false'              
+              }
+            }
+            stage('Deploy DEV') {
+              steps {
+                script {
+                  openshift.withCluster() {
+                    openshift.withProject(env.DEV_PROJECT) {
+                      openshift.selector("dc", env.APP_NAME).rollout().latest();
+                    }
+                  }
+                }
+              }
+            }
+            stage('Promote to STAGE?') {
+          
+              steps {
+                timeout(time:15, unit:'MINUTES') {
+                    input message: "Promote to STAGE?", ok: "Promote"
+                }
+
+                script {
+                  openshift.withCluster() {
+                      openshift.tag("${env.DEV_PROJECT}/${env.APP_NAME}:latest", "${env.STAGE_PROJECT}/${env.APP_NAME}:stage")
+                  }
+                }
+              }
+            }
+            stage('Deploy STAGE') {
+              steps {
+                script {
+                  openshift.withCluster() {
+                    openshift.withProject(env.STAGE_PROJECT) {
+                      openshift.selector("dc", env.APP_NAME).rollout().latest();
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    type: JenkinsPipeline
+  successfulBuildsHistoryLimit: 5
+  triggers:
+  - github:
+      secret: csSFCRPO
+    type: GitHub
+  - generic:
+      secret: csSFCRPO
+    type: Generic
+status:
+  lastVersion: 1
